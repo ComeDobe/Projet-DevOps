@@ -28,6 +28,25 @@ pipeline {
                 }
             }
         }
+        stage('Check Git Configuration') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    if ! git config --global user.name &> /dev/null
+                    then
+                        echo "Git user.name not set, configuring..."
+                        git config --global user.name "jenkins"
+                    fi
+                    if ! git config --global user.email &> /dev/null
+                    then
+                        echo "Git user.email not set, configuring..."
+                        git config --global user.email "jenkins@example.com"
+                    fi
+                    '''
+                }
+            }
+        }
        stage('Build image') {
            agent any
            steps {
@@ -36,7 +55,7 @@ pipeline {
               }
            }
        }
-       stage('Scan Image with  SNYK') {
+       stage('Scan Image with SNYK') {
             agent any
             environment {
                 SNYK_TOKEN = credentials('snyk_token')
@@ -52,7 +71,7 @@ pipeline {
                 }
             }
        }
-       stage('Run container based on builded image') {
+       stage('Run container based on built image') {
           agent any
           steps {
             script {
