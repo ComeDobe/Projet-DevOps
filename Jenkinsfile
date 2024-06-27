@@ -11,6 +11,21 @@ pipeline {
     }
     agent none
     stages {
+        stage('Install Git') {
+            agent any
+            steps {
+                sh '''
+                apt-get update
+                apt-get install -y git
+                '''
+            }
+        }
+        stage('Check Git Installation') {
+            agent any
+            steps {
+                sh 'git --version'
+            }
+        }
         stage('Checkout Source') {
             agent any
             steps {
@@ -19,7 +34,7 @@ pipeline {
                         branches: [[name: 'main']], 
                         userRemoteConfigs: [[
                             url: 'https://github.com/ComeDobe/Projet-DevOps.git', 
-                            credentialsId: 'github_credentials'
+                            credentialsId: 'your-credentials-id' // Remplacez par l'ID de vos identifiants configurés dans Jenkins
                         ]]
                     ])
                 }
