@@ -1,60 +1,117 @@
-/* import shared library. */
-@Library('christian-shared-library')_
-
 pipeline {
     environment {
         IMAGE_NAME = "ic-webapp"
         APP_CONTAINER_PORT = "8080"
-        DOCKERHUB_ID = "cd"
+        DOCKERHUB_ID = "cdobe01"
         DOCKERHUB_PASSWORD = credentials('dockerhub_password')
         ANSIBLE_IMAGE_AGENT = "registry.gitlab.com/robconnolly/docker-ansible:latest"
+        SNYK_TOKEN = credentials('snyk_token')
     }
     agent none
     stages {
-        stage('Checkout Source') {
+        stage('Installer Git si nécessaire') {
             agent any
             steps {
                 script {
-                    checkout([$class: 'GitSCM', 
-                        branches: [[name: 'main']], 
-                        userRemoteConfigs: [[
-                            url: 'https://github.com/ComeDobe/Projet-DevOps.git', 
-                            credentialsId: 'github_credentials'
-                        ]]
-                    ])
+                    def gitInstalled = sh(script: 'command -v git', returnStatus: true) == 0
+                    if (!gitInstalled) {
+                        error("Git ne peut pas être trouvé, veuillez installer Git.")
+                    } else {
+                        sh 'git --version'
+                    }
                 }
             }
         }
-        stage('Build image') {
+        stage('Cloner la bibliothèque partagée') {
             agent any
-            steps {
-                script {
-                    sh 'docker build --no-cache -f ./sources/app/${DOCKERFILE_NAME} -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ./sources/app'
-                }
-            }
-        }
-        stage('Scan Image with SNYK') {
-            agent any
-            environment {
-                SNYK_TOKEN = credentials('snyk_token')
-            }
             steps {
                 script {
                     sh '''
-                    echo "Starting Image scan ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ..."
-                    echo There is Scan result :
-                    SCAN_RESULT=$(docker run --rm -e SNYK_TOKEN=$SNYK_TOKEN -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/app snyk/snyk:docker snyk test --docker $DOCKERHUB_ID/$IMAGE_NAME:$IMAGE_TAG --json ||  if [[ $? -gt "1" ]];then echo -e "Warning, you must see scan result \n" ;  false; elif [[ $? -eq "0" ]]; then   echo "PASS : Nothing to Do"; elif [[ $? -eq "1" ]]; then   echo "Warning, passing with something to do";  else false; fi)
-                    echo "Scan ended"
+                    if [ ! -d "/var/lib/jenkins/workspace/ic-webapp@libs/SharedLibrary" ]; then
+                        echo "Clonage du dépôt..."
+                        git clone https://github.com/ComeDobe/SharedLibrary.git /var/lib/jenkins/workspace/ic-webapp@libs/SharedLibrary || { echo "Échec du clonage du dépôt"; exit 1; }
+                    else
+                        echo "Le dépôt existe déjà et n'est pas vide"
+                    fi
                     '''
                 }
             }
         }
-        stage('Run container based on builded image') {
+        stage('Vérifier la configuration Git') {
             agent any
             steps {
                 script {
                     sh '''
-                    echo "Cleaning existing container if exist"
+                    if ! git config --global user.name &> /dev/null; then
+                        echo "Git user.name n'est pas configuré, configuration..."
+                        git config --global user.name "jenkins"
+                    fi
+                    if ! git config --global user.email &> /dev/null; then
+                        echo "Git user.email n'est pas configuré, configuration..."
+                        git config --global user.email "jenkins@example.com"
+                    fi
+                    '''
+                }
+            }
+        }
+        stage('Vérifier le répertoire de cache Git') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    if [ ! -d "/var/lib/jenkins/caches/git-b323b2547a45924730c1ee3a4330e67e" ]; alors
+                        echo "Le répertoire de cache Git n'existe pas, création..."
+                        mkdir -p /var/lib/jenkins/caches/git-b323b2547a45924730c1ee3a4330e67e
+                    else
+                        echo "Le répertoire de cache Git existe déjà"
+                    fi
+                    '''
+                }
+            }
+        }
+        stage('Construire l\'image') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    if [ -z "${IMAGE_TAG}" ]; alors
+                        echo "IMAGE_TAG n'est pas défini, utilisation de 'latest'"
+                        IMAGE_TAG="latest"
+                    fi
+                    DOCKERFILE_NAME="Dockerfile_v4.0"
+                    if [ ! -f "./sources/${DOCKERFILE_NAME}" ]; alors
+                        echo "Dockerfile non trouvé : ./sources/${DOCKERFILE_NAME}"
+                        exit 1
+                    fi
+                    docker build --no-cache -f ./sources/${DOCKERFILE_NAME} -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ./sources
+                    '''
+                }
+            }
+        }
+        stage('Analyser l\'image avec SNYK') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    echo "Démarrage de l'analyse de l'image ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ..."
+                    SCAN_RESULT=$(docker run --rm -e SNYK_TOKEN=$SNYK_TOKEN -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/app snyk/snyk:docker snyk test --docker $DOCKERHUB_ID/$IMAGE_NAME:$IMAGE_TAG --json)
+                    if [ $? -ne 0 ]; alors
+                        echo "Avertissement, vous devez voir le résultat de l'analyse"
+                        exit 1
+                    else
+                        echo "PASS : Rien à signaler"
+                    fi
+                    echo "Analyse terminée"
+                    '''
+                }
+            }
+        }
+        stage('Exécuter le conteneur basé sur l\'image construite') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    echo "Nettoyage des conteneurs existants s'ils existent"
                     docker ps -a | grep -i $IMAGE_NAME && docker rm -f ${IMAGE_NAME}
                     docker run --name ${IMAGE_NAME} -d -p $APP_EXPOSED_PORT:$APP_CONTAINER_PORT  ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG       
                     sleep 5
@@ -62,7 +119,7 @@ pipeline {
                 }
             }
         }
-        stage('Test image') {
+        stage('Tester l\'image') {
             agent any
             steps {
                 script {
@@ -72,7 +129,7 @@ pipeline {
                 }
             }
         }
-        stage('Clean container') {
+        stage('Nettoyer le conteneur') {
             agent any
             steps {
                 script {
@@ -83,7 +140,7 @@ pipeline {
                 }
             }
         }
-        stage('Login and Push Image on docker hub') {
+        stage('Se connecter et pousser l\'image sur Docker Hub') {
             agent any
             steps {
                 script {
@@ -94,7 +151,7 @@ pipeline {
                 }
             }
         }
-        stage('Prepare ansible environment') {
+        stage('Préparer l\'environnement Ansible') {
             agent any
             environment {
                 VAULT_KEY = credentials('vault_key')
@@ -110,43 +167,43 @@ pipeline {
                 }
             }
         }
-        stage('Deploy application') {
+        stage('Déployer l\'application') {
             agent { docker { image 'registry.gitlab.com/robconnolly/docker-ansible:latest' } }
             stages {
-                stage('Install Ansible role dependencies') {
+                stage('Installer les dépendances des rôles Ansible') {
                     steps {
                         script {
-                            sh 'echo launch ansible-galaxy install -r roles/requirement.yml if needed'
+                            sh 'ansible-galaxy install -r roles/requirement.yml'
                         }
                     }
                 }
-                stage('Ping targeted hosts') {
+                stage('Tester la connexion aux hôtes cibles') {
                     steps {
                         script {
                             sh '''
                             apt update -y
                             apt install sshpass -y 
                             export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                            ansible all -m ping --private-key id_rsa  -l prod
+                            ansible all -m ping --private-key id_rsa -l prod
                             '''
                         }
                     }
                 }
-                stage('Check all playbook syntax') {
+                stage('Vérifier la syntaxe de tous les playbooks') {
                     steps {
                         script {
                             sh '''
                             export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                            ansible-lint -x 306 sources/ansible-ressources/playbooks/* || echo passing linter
-                            echo ${GIT_BRANCH}                                         
+                            ansible-lint -x 306 sources/ansible-ressources/playbooks/* || echo "Linter passant"
+                            echo ${GIT_BRANCH}
                             '''
                         }
                     }
                 }
-                stage('Deploy in PRODUCTION') {
-                    when { expression { GIT_BRANCH == 'origin/main'} }                
+                stage('Déploiement en PRODUCTION') {
+                    when { expression { GIT_BRANCH == 'origin/main' } }
                     stages {
-                        stage('PRODUCTION - Install Docker on all hosts') {
+                        stage('PRODUCTION - Installer Docker sur tous les hôtes') {
                             steps {
                                 script {
                                     sh '''
@@ -156,7 +213,7 @@ pipeline {
                                 }
                             }
                         }
-                        stage('PRODUCTION - Deploy pgadmin') {
+                        stage('PRODUCTION - Déployer pgadmin') {
                             steps {
                                 script {
                                     sh '''
@@ -166,7 +223,7 @@ pipeline {
                                 }
                             }
                         }
-                        stage('PRODUCTION - Deploy odoo') {
+                        stage('PRODUCTION - Déployer odoo') {
                             steps {
                                 script {
                                     sh '''
@@ -176,7 +233,7 @@ pipeline {
                                 }
                             }
                         }
-                        stage('PRODUCTION - Deploy ic-webapp') {
+                        stage('PRODUCTION - Déployer ic-webapp') {
                             steps {
                                 script {
                                     sh '''
