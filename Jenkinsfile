@@ -1,29 +1,26 @@
-/* import shared library. */
-@Library('christian-shared-library')_
-
 pipeline {
     environment {
         IMAGE_NAME = "ic-webapp"
+        IMAGE_TAG = "v1.0"
         APP_CONTAINER_PORT = "8080"
         DOCKERHUB_ID = "cdobe01"
         DOCKERHUB_PASSWORD = credentials('dockerhub_password')
         ANSIBLE_IMAGE_AGENT = "registry.gitlab.com/robconnolly/docker-ansible:latest"
+        APP_EXPOSED_PORT = "8000" 
     }
     agent none
     stages {
-       stage('Install Git if necessary') {
+        stage('Clone Shared Library') {
             agent any
             steps {
                 script {
                     sh '''
-                    if ! command -v git &> /dev/null
-                    then
-                        echo "Git could not be found, installing..."
-                        apt-get update && apt-get install -y git
-                    else
-                        echo "Git is already installed"
+                    if [ -d "/var/lib/jenkins/workspace/ic-webapp@libs/SharedLibrary" ]; then
+                        echo "Cleaning existing directory..."
+                        rm -rf /var/lib/jenkins/workspace/ic-webapp@libs/SharedLibrary
                     fi
-                    git --version
+                    echo "Cloning the repository..."
+                    git clone https://github.com/ComeDobe/SharedLibrary.git /var/lib/jenkins/workspace/ic-webapp@libs/SharedLibrary || { echo "Failed to clone repository"; exit 1; }
                     '''
                 }
             }
@@ -47,15 +44,49 @@ pipeline {
                 }
             }
         }
-       stage('Build image') {
+        stage('Verify Git Cache Directory') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    if [ ! -d "/var/lib/jenkins/caches/git-b323b2547a45924730c1ee3a4330e67e" ]; then
+                        echo "Git cache directory does not exist, creating..."
+                        mkdir -p /var/lib/jenkins/caches/git-b323b2547a45924730c1ee3a4330e67e
+                    fi
+                    '''
+                }
+            }
+        }
+        stage('Verify Build Context') {
+            agent any
+            steps {
+                script {
+                    dir('Projet-DevOps') {  // Assurez-vous de changer dans le bon répertoire
+                        sh '''
+                        echo "Listing current directory contents for verification:"
+                        ls -la
+                        if [ ! -f Dockerfile ]; then
+                            echo "Dockerfile does not exist in the current directory"
+                            exit 1
+                        else
+                            echo "Dockerfile found in the current directory"
+                        fi
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Build image') {
            agent any
            steps {
               script {
-                sh 'docker build --no-cache -f ./sources/app/${DOCKERFILE_NAME} -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ./sources/app'
+                sh '''
+                docker build --no-cache -f Dockerfile -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG .
+                '''
               }
            }
-       }
-       stage('Scan Image with SNYK') {
+        }
+        stage('Scan Image with SNYK') {
             agent any
             environment {
                 SNYK_TOKEN = credentials('snyk_token')
@@ -64,14 +95,14 @@ pipeline {
                 script {
                     sh '''
                     echo "Starting Image scan ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ..."
-                    echo There is Scan result :
-                    SCAN_RESULT=$(docker run --rm -e SNYK_TOKEN=$SNYK_TOKEN -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/app snyk/snyk:docker snyk test --docker $DOCKERHUB_ID/$IMAGE_NAME:$IMAGE_TAG --json ||  if [[ $? -gt "1" ]];then echo -e "Warning, you must see scan result \n" ;  false; elif [[ $? -eq "0" ]]; then   echo "PASS : Nothing to Do"; elif [[ $? -eq "1" ]]; then   echo "Warning, passing with something to do";  else false; fi)
+                    echo "Scan result:"
+                    SCAN_RESULT=$(docker run --rm -e SNYK_TOKEN=$SNYK_TOKEN -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd):/app snyk/snyk:docker snyk test --docker $DOCKERHUB_ID/$IMAGE_NAME:$IMAGE_TAG --json || if [[ $? -gt "1" ]]; then echo -e "Warning, you must see scan result\n"; false; elif [[ $? -eq "0" ]]; then echo "PASS: Nothing to do"; elif [[ $? -eq "1" ]]; then echo "Warning, passing with something to do"; else false; fi)
                     echo "Scan ended"
                     '''
                 }
             }
-       }
-       stage('Run container based on built image') {
+        }
+        stage('Run container based on built image') {
           agent any
           steps {
             script {
@@ -83,8 +114,8 @@ pipeline {
               '''
              }
           }
-       }
-       stage('Test image') {
+        }
+        stage('Test image') {
            agent any
            steps {
               script {
@@ -93,8 +124,8 @@ pipeline {
                 '''
               }
            }
-       }
-       stage('Clean container') {
+        }
+        stage('Clean container') {
           agent any
           steps {
              script {
@@ -104,9 +135,8 @@ pipeline {
                '''
              }
           }
-       }
-
-       stage ('Login and Push Image on docker hub') {
+        }
+        stage ('Login and Push Image on docker hub') {
           agent any
           steps {
              script {
@@ -116,9 +146,8 @@ pipeline {
                '''
              }
           }
-       }
-
-       stage ('Prepare ansible environment') {
+        }
+        stage ('Prepare ansible environment') {
           agent any
           environment {
             VAULT_KEY = credentials('vault_key')
@@ -133,100 +162,93 @@ pipeline {
                '''
              }
           }
-       }
-
-      stage('Deploy application') {
-        agent { docker { image 'registry.gitlab.com/robconnolly/docker-ansible:latest'  } }
-        stages {
-            stage ("Install Ansible role dependencies") {
-                steps {
-                    script {
-                        sh 'echo launch ansible-galaxy install -r roles/requirement.yml if needed'
-                    }
-                }
-            }
-
-            stage ("Ping targeted hosts") {
-                steps {
-                    script {
-                        sh '''
-                            apt update -y
-                            apt install sshpass -y 
-                            export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                            ansible all -m ping --private-key id_rsa  -l prod
-                        '''
-                    }
-                }
-            }
-
-            stage ("Check all playbook syntax") {
-                steps {
-                    script {
-                        sh '''
-                            export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                            ansible-lint -x 306 sources/ansible-ressources/playbooks/* || echo passing linter
-                            echo ${GIT_BRANCH}                                         
-                        '''
-                    }
-                }
-            }
-
-            stage ("Deploy in PRODUCTION") {
-                when { expression { GIT_BRANCH == 'origin/main'} }                
-                stages {
-                    stage ("PRODUCTION - Install Docker on all hosts") {
-                        steps {
-                            script {
-                                sh '''
-                                    export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                                    ansible-playbook sources/ansible-ressources/playbooks/install-docker.yml --vault-password-file vault.key --private-key id_rsa -l odoo_server,pg_admin_server
-                                '''
-                            }
+        }
+        stage('Deploy application') {
+            agent { docker { image 'registry.gitlab.com/robconnolly/docker-ansible:latest' } }
+            stages {
+                stage ("Install Ansible role dependencies") {
+                    steps {
+                        script {
+                            sh 'echo "Launch ansible-galaxy install -r ansible-ressources/roles/requirement.yml if needed"'
                         }
                     }
-
-                    stage ("PRODUCTION - Deploy pgadmin") {
-                        steps {
-                            script {
-                                sh '''
-                                    export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                                    ansible-playbook sources/ansible-ressources/playbooks/deploy-pgadmin.yml --vault-password-file vault.key --private-key id_rsa -l pg_admin
-                                '''
-                            }
+                }
+                stage ("Ping targeted hosts") {
+                    steps {
+                        script {
+                            sh '''
+                                apt update -y
+                                apt install sshpass -y 
+                                export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                ansible all -m ping --private-key id_rsa -l prod
+                            '''
                         }
                     }
-                    stage ("PRODUCTION - Deploy odoo") {
-                        steps {
-                            script {
-                                sh '''
-                                    export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                                    ansible-playbook sources/ansible-ressources/playbooks/deploy-odoo.yml --vault-password-file vault.key --private-key id_rsa -l odoo
-                                '''
-                            }
+                }
+                stage ("Check all playbook syntax") {
+                    steps {
+                        script {
+                            sh '''
+                                export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                ansible-lint -x 306 ansible-ressources/playbooks/* || echo "Passing linter"
+                                echo ${GIT_BRANCH}
+                            '''
                         }
                     }
-
-                    stage ("PRODUCTION - Deploy ic-webapp") {
-                        steps {
-                            script {
-                                sh '''
-                                    export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
-                                    ansible-playbook sources/ansible-ressources/playbooks/deploy-ic-webapp.yml --vault-password-file vault.key --private-key id_rsa -l ic_webapp
-                                '''
+                }
+                stage ("Deploy in PRODUCTION") {
+                    when { expression { GIT_BRANCH == 'origin/main'} }
+                    stages {
+                        stage ("PRODUCTION - Install Docker on all hosts") {
+                            steps {
+                                script {
+                                    sh '''
+                                        export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                        ansible-playbook ansible-ressources/playbooks/install-docker.yml --vault-password-file vault.key --private-key id_rsa -l odoo_server,pg_admin_server
+                                    '''
+                                }
+                            }
+                        }
+                        stage ("PRODUCTION - Deploy pgadmin") {
+                            steps {
+                                script {
+                                    sh '''
+                                        export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                        ansible-playbook ansible-ressources/playbooks/deploy-pgadmin.yml --vault-password-file vault.key --private-key id_rsa -l pg_admin
+                                    '''
+                                }
+                            }
+                        }
+                        stage ("PRODUCTION - Deploy odoo") {
+                            steps {
+                                script {
+                                    sh '''
+                                        export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                        ansible-playbook ansible-ressources/playbooks/deploy-odoo.yml --vault-password-file vault.key --private-key id_rsa -l odoo
+                                    '''
+                                }
+                            }
+                        }
+                        stage ("PRODUCTION - Deploy ic-webapp") {
+                            steps {
+                                script {
+                                    sh '''
+                                        export ANSIBLE_CONFIG=$(pwd)/ansible-ressources/ansible.cfg
+                                        ansible-playbook ansible-ressources/playbooks/deploy-ic-webapp.yml --vault-password-file vault.key --private-key id_rsa -l ic_webapp
+                                    '''
+                                }
                             }
                         }
                     }
                 }
             }
         }
-      }
-    }  
-
+    }
     post {
         always {
             script {
                 slackNotifier currentBuild.result
             }
         }
-    }    
+    }
 }
