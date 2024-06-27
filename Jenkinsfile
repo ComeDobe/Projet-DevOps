@@ -11,22 +11,38 @@ pipeline {
     }
     agent none
     stages {
+       stage('Install Git if necessary') {
+            agent any
+            steps {
+                script {
+                    sh '''
+                    if ! command -v git &> /dev/null
+                    then
+                        echo "Git could not be found, installing..."
+                        apt-get update && apt-get install -y git
+                    else
+                        echo "Git is already installed"
+                    fi
+                    git --version
+                    '''
+                }
+            }
+        }
        stage('Build image') {
            agent any
            steps {
               script {
                 sh 'docker build --no-cache -f ./sources/app/${DOCKERFILE_NAME} -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ./sources/app'
-
               }
            }
        }
        stage('Scan Image with  SNYK') {
             agent any
-            environment{
+            environment {
                 SNYK_TOKEN = credentials('snyk_token')
             }
             steps {
-                script{
+                script {
                     sh '''
                     echo "Starting Image scan ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ..."
                     echo There is Scan result :
@@ -100,7 +116,7 @@ pipeline {
           }
        }
 
-      stage('Deploy application ') {
+      stage('Deploy application') {
         agent { docker { image 'registry.gitlab.com/robconnolly/docker-ansible:latest'  } }
         stages {
             stage ("Install Ansible role dependencies") {
@@ -111,7 +127,7 @@ pipeline {
                 }
             }
 
-            stage ("Ping  targeted hosts") {
+            stage ("Ping targeted hosts") {
                 steps {
                     script {
                         sh '''
@@ -146,9 +162,6 @@ pipeline {
                                     export ANSIBLE_CONFIG=$(pwd)/sources/ansible-ressources/ansible.cfg
                                     ansible-playbook sources/ansible-ressources/playbooks/install-docker.yml --vault-password-file vault.key --private-key id_rsa -l odoo_server,pg_admin_server
                                 '''
-
-                                
-                                
                             }
                         }
                     }
@@ -184,11 +197,8 @@ pipeline {
                             }
                         }
                     }
-
-
                 }
             }
-
         }
       }
     }  
