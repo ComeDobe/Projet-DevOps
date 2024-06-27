@@ -36,3 +36,8 @@ III - Ansible
 - ansible-playbook playbooks/deploy-odoo.yml -l odoo_server
 - ansible-playbook playbooks/deploy-pgadmin.yml -l pg_admin_server
 - ansible-playbook playbooks/deploy-ic-webapp.yml -l ic_webapp_server
+
+
+Vefication deploiement:
+
+ansible all -m shell -a "docker ps" -i hosts.yml --become
