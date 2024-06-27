@@ -34,7 +34,7 @@ pipeline {
                         branches: [[name: 'main']], 
                         userRemoteConfigs: [[
                             url: 'https://github.com/ComeDobe/Projet-DevOps.git', 
-                            credentialsId: 'your-credentials-id' // Remplacez par l'ID de vos identifiants configurés dans Jenkins
+                            credentialsId: 'github_credentials' 
                         ]]
                     ])
                 }
