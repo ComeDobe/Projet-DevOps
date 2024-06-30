@@ -1,9 +1,61 @@
-1 - Deploiement et installation docker :
+Partie I Dockerisation de l'application :
+
+- Docker build -f ./Dockerfile -t cdobe01/ic-webapp:v1.0 .
+
+- docker run -d --name ic-webapp-test -p 8000:8080 cdobe01/ic-webapp:v1.0
+
+- docker login
+
+- docker push cdobe01/ic-webapp:v1.0
+
+Partie II Kubernetes :
+
+- kubectl apply -f ./ic-webapp
+- kubectl apply -f ./postgres
+- kubectl apply -f ./odoo
+- kubectl apply -f ./pgadmi
+
+Dossier à creer dans le repertoire de travail: 
+
+ sudo mkdir -p /data_k8s/lib-odoo /data_k8s/pgadmin4 /data_k8s/postgres /data_k8s/addons /data_k8s/config
+
+
+ sudo chmod 777 -R /data_k8s/lib-odoo /data_k8s/pgadmin4 /data_k8s/postgres /data_k8s/addons /data_k8s/config
+
+
+Paties III Ansible :
+
+- Confiuration des serveurs :
+
+- ssh-keygen -t rsa -b 4096 -C "adresse@adresse.fr"
+
+- ssh-copy-id -i ~/.ssh/id_rsa.pub vagrant@ip_server1
+- ssh-copy-id -i ~/.ssh/id_rsa.pub vagrant@ip_server2
+
+- Connection ssh entre les serveurs :
+
+- ssh vagrant@ip_server1
+- ssh vagrant@ip_server2
+
+- Deploiement et installation docker :
 
 - ansible-playbook playbooks/install-docker.yml -l prod
 
-2 -Deploiement des serveurs
+- Deploiement des serveurs :
 
 - ansible-playbook playbooks/deploy-odoo.yml -l odoo_server
 - ansible-playbook playbooks/deploy-pgadmin.yml -l pg_admin_server
 - ansible-playbook playbooks/deploy-ic-webapp.yml -l ic_webapp_server
+
+
+Vefication deploiement:
+
+- ansible all -m shell -a "docker ps" -i hosts.yml --become
+
+- ansible -i hosts.yml ic_webapp_server,pg_admin_server,odoo_server -m shell -a "docker ps -a" --become
+
+
+Demmarrage des serveurs :
+
+- ansible -i hosts.yml ic_webapp_server -m shell -a "docker start ic-webapp pgadmin" --become
+- ansible -i hosts.yml odoo_server -m shell -a "docker start odoo postgres" --become
