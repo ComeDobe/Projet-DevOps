@@ -1,55 +1,73 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pg-admin
+  name: odoo
+  namespace: icgroup
   labels:
-    app: pg-admin
+    app: odoo
     env: prod
-  namespace: ic-webapp
 spec:
   replicas: 1
   selector:
-    matchLabels: 
-      app: pg-admin
+    matchLabels:
+      app: odoo
   template:
     metadata:
       labels:
-        app: pg-admin
+        app: odoo
     spec:
       initContainers:
-      - name: init-pgadmin
+      - name: init-permissions
         image: busybox
-        command: ['sh', '-c', 'mkdir -p /var/lib/pgadmin/sessions && chmod -R 777 /var/lib/pgadmin']
+        command: ['sh', '-c', 'mkdir -p /etc/odoo /var/lib/odoo /mnt/extra-addons && chmod -R 777 /etc/odoo /var/lib/odoo /mnt/extra-addons']
         volumeMounts:
-        - name: pg-admin-data
-          mountPath: /var/lib/pgadmin
+        - name: odoo-persistent-storage
+          mountPath: /etc/odoo
+        - name: lib-odoo-persistent-storage
+          mountPath: /var/lib/odoo
+        - name: extra-addons-persistent-storage
+          mountPath: /mnt/extra-addons
       containers:
-      - image: dpage/pgadmin4
-        name: pg-admin
+      - name: odoo
+        image: odoo:14.0  
+        ports:
+        - name: odoo
+          containerPort: 8069
         env:
-        - name: PGADMIN_DEFAULT_EMAIL
-          value: pgadmin@pgadmin.com
-        - name: PGADMIN_DEFAULT_PASSWORD
+        - name: USER
+          value: toto
+        - name: HOST
+          value: postgres
+        - name: PASSWORD
           valueFrom:
             secretKeyRef:
-              name: pg-admin
-              key: PGADMIN_DEFAULT_PASSWORD
-        ports:
-        - containerPort: 5050
-          name: postgres
+              name: odoo
+              key: PASSWORD
+        - name: DATABASE
+          value: odoo  
         volumeMounts:
-        - name: pg-admin-server
-          mountPath: /pgadmin4/servers.json
-          subPath: servers.json
-        - name: pg-admin-data
-          mountPath: /var/lib/pgadmin
+        - name: odoo-persistent-storage
+          mountPath: /etc/odoo
+        - name: lib-odoo-persistent-storage
+          mountPath: /var/lib/odoo
+        - name: extra-addons-persistent-storage
+          mountPath: /mnt/extra-addons
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "512Mi"
+            cpu: "2"
       volumes:
-      - name: pg-admin-server
-        configMap:
-          name: pgadmin-config
-          items:
-          - key: servers.json
-            path: servers.json    
-      - name: pg-admin-data
+      - name: odoo-persistent-storage
+        hostPath:
+          path: /data_k8s/config 
+          type: Directory
+      - name: extra-addons-persistent-storage
+        hostPath:
+          path: /data_k8s/addons  
+          type: Directory
+      - name: lib-odoo-persistent-storage
         persistentVolumeClaim:
-          claimName: pgadmin-pvc
+          claimName: odoo-pvc

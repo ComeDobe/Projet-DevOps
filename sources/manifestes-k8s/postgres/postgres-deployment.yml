@@ -2,14 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: postgres
+  namespace: icgroup
   labels:
     app: postgres
     env: prod
-  namespace: ic-webapp
 spec:
   replicas: 1
   selector:
-    matchLabels: 
+    matchLabels:
       app: postgres
   template:
     metadata:
@@ -17,8 +17,8 @@ spec:
         app: postgres
     spec:
       containers:
-      - image: postgres:10
-        name: postgres
+      - name: postgres
+        image: postgres:10
         env:
         - name: POSTGRES_DB
           value: postgres
@@ -30,11 +30,18 @@ spec:
               name: postgres
               key: POSTGRES_PASSWORD
         ports:
-        - containerPort: 5432
-          name: postgres
+        - name: postgres
+          containerPort: 5432
         volumeMounts:
         - name: pg-data
           mountPath: /var/lib/postgresql/data
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "500m"
+          limits:
+            memory: "512Mi"
+            cpu: "1"
       volumes:
       - name: pg-data
         hostPath:

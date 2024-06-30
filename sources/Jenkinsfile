@@ -1,3 +1,7 @@
+
+/* import shared library. */
+@Library('dobe-shared-library')_
+
 pipeline {
     environment {
         IMAGE_NAME = "ic-webapp"
@@ -37,6 +41,19 @@ pipeline {
                 }
             }
         }
+                stage('Cloner le projet') {
+            steps {
+                script {
+                    sh '''
+                    echo "Clonage du dépôt..."
+                    TEMP_DIR=$(mktemp -d)
+                    git clone --branch main https://github.com/ComeDobe/Projet-DevOps.git $TEMP_DIR
+                    cp -r $TEMP_DIR/* ${WORKSPACE}
+                    rm -rf $TEMP_DIR
+                    '''
+                }
+            }
+        }
         stage('Vérifier la configuration Git') {
             agent any
             steps {
@@ -69,25 +86,20 @@ pipeline {
                 }
             }
         }
-        stage('Construire l\'image') {
-            agent any
+
+     stage('Construire l\'image') {
             steps {
                 script {
                     sh '''
-                    if [ -z "${IMAGE_TAG}" ]; alors
-                        echo "IMAGE_TAG n'est pas défini, utilisation de 'latest'"
-                        IMAGE_TAG="latest"
-                    fi
-                    DOCKERFILE_NAME="Dockerfile_v4.0"
-                    if [ ! -f "./sources/${DOCKERFILE_NAME}" ]; alors
-                        echo "Dockerfile non trouvé : ./sources/${DOCKERFILE_NAME}"
-                        exit 1
-                    fi
+                    cd ${WORKSPACE}
+                    pwd
+                    ls -l
                     docker build --no-cache -f ./sources/${DOCKERFILE_NAME} -t ${DOCKERHUB_ID}/$IMAGE_NAME:$IMAGE_TAG ./sources
                     '''
                 }
             }
         }
+
         stage('Analyser l\'image avec SNYK') {
             agent any
             steps {
