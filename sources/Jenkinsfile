@@ -41,7 +41,7 @@ pipeline {
                 }
             }
         }
-                stage('Cloner le projet') {
+        stage('Cloner le projet') {
             steps {
                 script {
                     sh '''
