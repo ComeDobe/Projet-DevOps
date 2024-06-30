@@ -51,12 +51,12 @@ Paties III Ansible :
 
 Vefication deploiement:
 
-ansible all -m shell -a "docker ps" -i hosts.yml --become
+- ansible all -m shell -a "docker ps" -i hosts.yml --become
 
-ansible -i hosts.yml ic_webapp_server,pg_admin_server,odoo_server -m shell -a "docker ps -a" --become
+- ansible -i hosts.yml ic_webapp_server,pg_admin_server,odoo_server -m shell -a "docker ps -a" --become
 
 
 Demmarrage des serveurs :
 
-ansible -i hosts.yml ic_webapp_server -m shell -a "docker start ic-webapp pgadmin" --become
-ansible -i hosts.yml odoo_server -m shell -a "docker start odoo postgres" --become
+- ansible -i hosts.yml ic_webapp_server -m shell -a "docker start ic-webapp pgadmin" --become
+- ansible -i hosts.yml odoo_server -m shell -a "docker start odoo postgres" --become
