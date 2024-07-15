@@ -26,7 +26,7 @@ Dossier à creer dans le repertoire de travail:
 
 Paties III Ansible :
 
-- Confiuration des serveurs :
+- Configuration des serveurs :
 
 - ssh-keygen -t rsa -b 4096 -C "adresse@adresse.fr"
 
@@ -49,7 +49,7 @@ Paties III Ansible :
 - ansible-playbook playbooks/deploy-ic-webapp.yml -l ic_webapp_server
 
 
-Vefication deploiement:
+Verification deploiement:
 
 - ansible all -m shell -a "docker ps" -i hosts.yml --become
 
